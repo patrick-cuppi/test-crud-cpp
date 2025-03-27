@@ -1,61 +1,45 @@
 #include "Database.h"
-#include <iostream>
-
-void menu()
-{
-    Database db;
-    int option;
-    do
-    {
-        std::cout << "\n1. Criar Pessoa";
-        std::cout << "\n2. Listar Pessoas";
-        std::cout << "\n3. Atualizar Pessoa";
-        std::cout << "\n4. Deletar Pessoa";
-        std::cout << "\n5. Sair";
-        std::cout << "\nEscolha uma opcao: ";
-        std::cin >> option;
-
-        if (option == 1)
-        {
-            std::string name, email, password;
-            std::cout << "Nome: ";
-            std::cin >> name;
-            std::cout << "Email: ";
-            std::cin >> email;
-            std::cout << "Senha: ";
-            std::cin >> password;
-            db.createPerson(name, email, password);
-        }
-        else if (option == 2)
-        {
-            db.readPeople();
-        }
-        else if (option == 3)
-        {
-            int id;
-            std::string name, email, password;
-            std::cout << "ID da pessoa para atualizar: ";
-            std::cin >> id;
-            std::cout << "Novo Nome: ";
-            std::cin >> name;
-            std::cout << "Novo Email: ";
-            std::cin >> email;
-            std::cout << "Nova Senha: ";
-            std::cin >> password;
-            db.updatePerson(id, name, email, password);
-        }
-        else if (option == 4)
-        {
-            int id;
-            std::cout << "ID da pessoa para deletar: ";
-            std::cin >> id;
-            db.deletePerson(id);
-        }
-    } while (option != 5);
-}
+#include <crow.h>
 
 int main()
 {
-    menu();
+    Database db;
+    crow::SimpleApp app;
+
+    CROW_ROUTE(app, "/people").methods(crow::HTTPMethod::Get)([&db]()
+                                                              {
+        std::ostringstream os;
+        pqxx::nontransaction N(db.conn);
+        pqxx::result R = N.exec("SELECT id, name, email FROM people;");
+        crow::json::wvalue people;
+        for (size_t i = 0; i < R.size(); ++i) {
+            people[i]["id"] = R[i]["id"].as<int>();
+            people[i]["name"] = R[i]["name"].as<std::string>();
+            people[i]["email"] = R[i]["email"].as<std::string>();
+        }
+        return crow::response(people); });
+
+    CROW_ROUTE(app, "/person").methods(crow::HTTPMethod::Post)([&db](const crow::request &req)
+                                                               {
+        auto data = crow::json::load(req.body);
+        if (!data)
+            return crow::response(400, "Invalid JSON");
+        db.createPerson(data["name"].s(), data["email"].s(), data["password"].s());
+        return crow::response(201, "Created"); });
+
+    CROW_ROUTE(app, "/person/<int>").methods(crow::HTTPMethod::Put)([&db](int id, const crow::request &req)
+                                                                    {
+        auto data = crow::json::load(req.body);
+        if (!data)
+            return crow::response(400, "Invalid JSON");
+        db.updatePerson(id, data["name"].s(), data["email"].s(), data["password"].s());
+        return crow::response(200, "Updated"); });
+
+    CROW_ROUTE(app, "/person/<int>").methods(crow::HTTPMethod::Delete)([&db](int id)
+                                                                       {
+        db.deletePerson(id);
+        return crow::response(200, "Deleted"); });
+
+    app.port(8080).multithreaded().run();
     return 0;
 }
